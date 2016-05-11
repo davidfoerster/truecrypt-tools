@@ -5,6 +5,9 @@
  *      Author: malte
  */
 
+#ifndef _POSIX_C_SOURCE
+	#define _POSIX_C_SOURCE 200112L
+#endif
 #define INLINE
 #include "flagged_int.h"
 #include <stdint.h>
@@ -107,7 +110,9 @@ bool push_flagged_int(struct a_flagged_int *a, long value, bool valid)
 
 void a_flagged_int_slice(struct a_flagged_int *a, ssize_t start_, size_t count)
 {
-	size_t start = (size_t) ((start >= 0) ? start : (start + a->length));
+	size_t start = (size_t) ((start_ >= 0) ? 
+		start_ : 
+		(start_ + (ssize_t) a->length));
 	if (start < a->length) {
 		if (start + count > a->length)
 			count = a->length - start;

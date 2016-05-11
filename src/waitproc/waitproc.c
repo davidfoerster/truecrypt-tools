@@ -1,5 +1,6 @@
-#define _GNU_SOURCE
-
+#ifndef _POSIX_C_SOURCE
+	#define _POSIX_C_SOURCE 200112L
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <memory.h>
@@ -37,7 +38,7 @@ struct waitproc_options {
 	struct timespec wait_start;
 	int last_signal;
 }
-waitproc_options = { {0} };
+waitproc_options = { 0 };
 
 
 enum waitproc_flags_position {
@@ -50,25 +51,34 @@ enum waitproc_flags_position {
 	_WAITPROC_FLAG_COUNT
 };
 
-inline flag_t waitproc_flag_frompos(enum waitproc_flags_position flagpos)
+static inline
+flag_t waitproc_flag_frompos(enum waitproc_flags_position flagpos)
 {
 	assert(flagpos >= 0 && flagpos < _WAITPROC_FLAG_COUNT);
 	return 1UL << flagpos;
 }
 
-inline bool waitproc_flags_test(enum waitproc_flags_position flagpos) {
+static inline
+bool waitproc_flags_test(enum waitproc_flags_position flagpos)
+{
 	return waitproc_options.flags & waitproc_flag_frompos(flagpos);
 }
 
-inline void waitproc_flags_set(enum waitproc_flags_position flagpos) {
+static inline
+void waitproc_flags_set(enum waitproc_flags_position flagpos)
+{
 	waitproc_options.flags |= waitproc_flag_frompos(flagpos);
 }
 
-inline void waitproc_flags_unset(enum waitproc_flags_position flagpos) {
+static inline
+void waitproc_flags_unset(enum waitproc_flags_position flagpos)
+{
 	waitproc_options.flags &= ~waitproc_flag_frompos(flagpos);
 }
 
-inline void waitproc_flags_setc(enum waitproc_flags_position flagpos, bool value) {
+static inline
+void waitproc_flags_setc(enum waitproc_flags_position flagpos, bool value)
+{
 	const flag_t mask = waitproc_flag_frompos(flagpos);
 	assert((unsigned) value <= 1);
 	waitproc_options.flags = (waitproc_options.flags & ~mask) | ((flag_t) value << flagpos);
@@ -241,11 +251,9 @@ void signal_handler_store_signum(int signal)
 
 void set_alarm()
 {
-	int r __attribute__((unused));
 	assert(!waitproc_flags_test(WAITPROC_FLAG_ALARMSET) && timespec_iszero(&waitproc_options.wait_start));
 
-	r = clock_gettime(CLOCK_MONOTONIC, &waitproc_options.wait_start);
-	assert(r == 0);
+	verify(clock_gettime(CLOCK_MONOTONIC, &waitproc_options.wait_start) == 0);
 
 	if (waitproc_options.interval_sec) {
 		struct sigaction action;
@@ -438,21 +446,27 @@ static struct argp_option const argp_options[] = {
 		"The letters w, d, h, m, and s may be used to express an interval "
 		"in weeks, days, hours, minutes, or seconds respectively. Multiple "
 		"such expressions may be used in that order to add their intervals. "
-		"The default is to use seconds." },
+		"The default is to use seconds.",
+		0 },
 
 	{ "disjunctive",	'd', NULL, 0,
 		"Exit with status 0, if at least one PID terminated while waiting for it. "
-		"The default is to fail, if at least one did not terminate."},
+		"The default is to fail, if at least one did not terminate.",
+		0 },
 
 	{ "terminate",		't', NULL, 0,
-		"Send SIGTERM to each PID before waiting for them to terminate." },
+		"Send SIGTERM to each PID before waiting for them to terminate.",
+		0 },
 
 	{ "kill", 			'k', NULL, 0,
-		"Send SIGKILL to each PID still running after INTERVAL." },
+		"Send SIGKILL to each PID still running after INTERVAL.",
+		0 },
 
 	{ "quiet", 			'q', NULL, 0,
 		"Don't write anything to stdout. Normally, when a PID terminates, "
-		"we immediately print a line with that PID." },
+		"we immediately print a line with that PID.",
+		0 },
+
 	{ 0 }
 };
 

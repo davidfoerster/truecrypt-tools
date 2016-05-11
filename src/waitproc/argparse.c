@@ -5,6 +5,9 @@
  *      Author: malte
  */
 
+#ifndef _POSIX_C_SOURCE
+	#define _POSIX_C_SOURCE 200112L
+#endif
 #include "argparse.h"
 #include <stdbool.h>
 #include <string.h>
@@ -16,11 +19,15 @@
 
 // forward declarations ===================================
 
-error_t argp_handle_argument_internal(const char *arg, struct argp_state *state, struct argp_action *action);
-error_t argp_handle_argument_parse(const char *arg, struct argp_state *state, struct argp_action *action);
-char *argtype_to_conversion_specifier(enum argument_type type, char *fmt);
-bool argument_check_validity(const struct argp_action *action);
-int parse_period(const char *s, long *period);
+static error_t argp_handle_argument_internal(const char *arg, struct argp_state *state, struct argp_action *action);
+
+static error_t argp_handle_argument_parse(const char *arg, struct argp_state *state, struct argp_action *action);
+
+static char *argtype_to_conversion_specifier(enum argument_type type, char *fmt);
+
+static bool argument_check_validity(const struct argp_action *action);
+
+static int parse_period(const char *s, long *period);
 
 
 // implementation =========================================
