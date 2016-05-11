@@ -1,0 +1,13 @@
+#!/bin/sh
+# Unmount TrueCrypt volumes before hibernation
+EXE=/usr/local/lib/truecrypt/dismount-volumes
+export PATH="$PATH:/usr/local/bin"
+
+case "$1" in
+	hibernate)
+		[ ! -x "$EXE" ] || exec "$EXE" 10;;
+	suspend|resume|thaw|'')
+		;;
+	*)
+		echo "Invalid params: $*" >&2; exit 2;;
+esac
