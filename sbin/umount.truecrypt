@@ -1,0 +1,39 @@
+#!/bin/bash
+# Unmount helper for TrueCrypt volumes
+set -e
+TRUECRYPT=truecrypt
+
+if [ $# -lt 1 ]; then
+	echo 'Error: too few arguments -- I need at least a device or a mount point.' >&2
+	exit 2
+fi
+
+MOUNTSPEC="$1"
+if ! [ -b "$MOUNTSPEC" -o -d "$MOUNTSPEC" ]; then
+	printf 'Error: „%s“ must be a block device or a directory.\n' "$MOUNTSPEC" >&2
+	exit 2
+fi
+shift
+
+
+if printf '%s\0' "$@" | grep -qzEe '^-[nlfr]*v'; then
+	VERBOSE=true
+	verbose() { print_verbose "$@" && "$@"; }
+else
+	VERBOSE=false
+	verbose() { "$@"; }
+fi
+
+print_verbose() {
+	[ "$1" != exec ] || shift
+	echo + "$*"
+}
+
+
+declare -ra MOUNTINFO=( `"$TRUECRYPT" -t -l "$MOUNTSPEC" 2>&-` )
+TCSLOT="${MOUNTINFO[0]%:}"
+TCDEVICE="${MOUNTINFO[2]}"
+MOUNTPOINT="${MOUNTINFO[3]}"
+
+[ "$MOUNTPOINT" = - ] || umount -i "$@" "$TCDEVICE"
+verbose exec "$TRUECRYPT" -t -d --slot="$TCSLOT"

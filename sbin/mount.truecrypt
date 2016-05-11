@@ -1,32 +1,58 @@
 #!/bin/bash
 # Mount helper for TrueCrypt volumes
+set -e -o pipefail
 
-set -e
-ARGS="`getopt -n "${0##*/}" -o 'fo:v' --long 'fake,options:,verbose' -- "$@"`" || exit 2
-eval set -- "$ARGS"
+if [ $# -lt 2 ]; then
+	echo 'Error: too few arguments -- I need at least a device and a mount point.' >&2
+	exit 2
+fi
 
-declare TRUECRYPT=truecrypt
+DEVICE="$1"
+MOUNTPOINT="$2"
+if [ ! -b "$DEVICE" -o ! -d "$MOUNTPOINT" ]; then
+	printf 'Error: „%s“ must be a block device and „%s“ a directory.\n' "$DEVICE" "$MOUNTPOINT" >&2
+	exit 2
+fi
+shift 2
+
+
+TRUECRYPT=truecrypt
+HELPER="helper=$TRUECRYPT"
+FSTYPE=auto
+PROTECTHIDDEN=no
+OP=mount
+VERBOSE=false; verbose() { "$@"; }
 declare -a TCOPTIONS
-declare FSTYPE FSOPTIONS MOUNTOPTIONS KEYFILES PROTECTIONKEYFILES PASSWORD PROTECTIONPASSWORD PROTECTHIDDEN=no REMOUNT=false FAKE=false VERBOSE=false
+declare FSOPTIONS MOUNTOPTIONS TCMOUNTOPTIONS KEYFILES PROTECTIONKEYFILES PASSWORD PROTECTIONPASSWORD
 
-parse_fsoptions() {
+print_verbose()
+{
+	[ "$1" != exec ] || shift
+	echo + "$*"
+}
+
+
+if [ $# -gt 0 ]; then
+	ARGS="`getopt -n "${0##*/}" -o 'sfnvo:t:' -- "$@"`" || exit 2
+	eval set -- "$ARGS"
+	unset ARGS
+
+parse_fsoptions()
+{
 	local IFS=','
 	for arg in $1; do
 		case "$arg" in
 		system|headerbak|nokernelcrypto|timestamp|ts)
-			MOUNTOPTIONS="$MOUNTOPTIONS,$arg";;
+			TCMOUNTOPTIONS+="$arg,";;
 		readonly|ro)
-			MOUNTOPTIONS="$MOUNTOPTIONS,$arg"
-			FSOPTIONS="$FSOPTIONS,ro";;
+			TCMOUNTOPTIONS+="$arg,"
+			FSOPTIONS+='ro,';;
 		auto|noauto|bootwait|nobootwait)
 			;;
-		filesystem=*)
-			FSTYPE="${arg#*=}"
-			TCOPTIONS+=( "--filesystem=$FSTYPE" );;
 		keyfile=*)
-			KEYFILES="$KEYFILES,${arg#*=}";;
+			KEYFILES+="${arg#*=},";;
 		protection-keyfile=*)
-			PROTECTIONKEYFILES="$PROTECTIONKEYFILES,${arg#*=}";;
+			PROTECTIONKEYFILES+="${arg#*=},";;
 		password=*)
 			PASSWORD="${arg#*=}";;
 		protect-hidden=*)
@@ -34,87 +60,117 @@ parse_fsoptions() {
 		protection-password=*)
 			PROTECTIONPASSWORD="${arg#*=}";;
 		remount)
-			REMOUNT=true #;& #fall through
-			FSOPTIONS="$FSOPTIONS,$arg";;
+			OP=remount
+			FSOPTIONS+="$arg,";;
 		*)
-			FSOPTIONS="$FSOPTIONS,$arg";;
+			FSOPTIONS+="$arg,";;
 		esac
 	done
 	unset arg
 }
 
-while true; do
-	case "$1" in
-	-o|--options)
-		parse_fsoptions "$2"; shift;;
-	-f|--fake)
-		FAKE=true;;
-	-v|--verbose)
-		VERBOSE=true;;
-	--)
-		shift; break;;
-	*)
-		echo 'Internal Error!' >&2; exit 127;;
-	esac
-	shift
-done
-DEVICE="$1" MOUNTPOINT="$2"
+	while : ; do
+		arg="$1"
+		case "$arg" in
+		-o)
+			parse_fsoptions "$2"
+			arg=
+			shift;;
+		-v)
+			VERBOSE=true
+			verbose() { print_verbose "$@" && "$@"; };;
+		-t)
+			FSTYPE="${2#truecrypt.}"
+			arg=
+			shift;;
+		-f)
+			printf 'Ignoring unimplemented option: %s\n' "$arg" >&2;;
+		--)
+			shift
+			break;;
+		*)
+			printf 'Invalid option: %s\n' "$arg" >&2
+			exit 2;;
+		esac
+		shift
+		MOUNTOPTIONS+="$arg "
+	done
+	unset arg
+fi
 
 
-if $REMOUNT; then
-	declare -ra MOUNTINFO=(`"$TRUECRYPT" --text --list "$MOUNTPOINT"`)
-	if [ "$DEVICE" != "${MOUNTINFO[1]}" ]; then
-		echo "Error: The specified device \`$DEVICE' does not match the mountpoint \`$MOUNTPOINT'." >&2
+default_keyfiles()
+{
+	if [ -n "$1" ]; then
+		local HOME=''"`getent passwd "$1" | cut -d ':' -f 6`"
+	elif [ "${HOME:0:1}" != / ]; then
+		return 1
+	fi
+	local -r SOURCE="$HOME/.TrueCrypt/Default Keyfiles.xml"
+	[ ! -r "$SOURCE" ] || xpath -s ',' -q -e '/TrueCrypt/defaultkeyfiles/keyfile/text()' "$SOURCE"
+}
+
+
+tc_mount()
+{
+	if [ -z "$KEYFILES" ]; then
+		KEYFILES="`default_keyfiles "$SUDO_USER"`"
+		if [ -z "$PROTECTIONKEYFILES" ]; then
+			PROTECTIONKEYFILES="$KEYFILES"
+		fi
+	elif [ "$PROTECTHIDDEN" = yes -a -z "$PROTECTIONKEYFILES" ]; then
+		PROTECTIONKEYFILES="`default_keyfiles "$SUDO_USER"`"
+	fi
+
+	if [ "$PROTECTHIDDEN" = yes ]; then
+		TCOPTIONS+=( --protection-password="$PROTECTIONPASSWORD" --protection-keyfiles="$PROTECTIONKEYFILES" )
+	fi
+
+	verbose "$TRUECRYPT" --text --mount \
+		--mount-options="$TCMOUNTOPTIONS" --filesystem=none \
+		--password="$PASSWORD" --keyfiles="$KEYFILES" \
+		--protect-hidden="$PROTECTHIDDEN" \
+		"${TCOPTIONS[@]}" "$DEVICE"
+	MOUNTINFO=( `"$TRUECRYPT" -t -l "$DEVICE"` )
+	TCDEVICE="${MOUNTINFO[2]}"
+	local -i r=0
+	verbose mount -o "$HELPER,$FSOPTIONS" -t "$FSTYPE" $MOUNTOPTIONS "$TCDEVICE" "$MOUNTPOINT" || r=$?
+
+	if [ $r -ne 0 ]; then
+		exec >&2
+		printf 'Warning: A TrueCrypt block device remains in slot %i.\n' "${MOUNTINFO[0]%:}"
+		! $VERBOSE || printf 'TrueCrypt says:\n%s\n' "${MOUNTINFO[*]}"
+		exit $r
+	fi
+
+	if ! awk -v FS=' ' -v TCDEVICE="$TCDEVICE" '
+		BEGIN{ r = 2; }
+		{
+			if ($1 == TCDEVICE) {
+				r = !match($4, "(^|,)'"$HELPER"'($|,)");
+				exit;
+			}
+		}
+		END{ exit r; }' \
+		/etc/mtab
+	then
+		verbose exec mount -o "remount,$HELPER" "$TCDEVICE"
+	fi
+}
+
+
+tc_remount()
+{
+	local -ra MOUNTINFO=(`"$TRUECRYPT" -t -l "$MOUNTPOINT"`)
+	! $VERBOSE || printf 'TrueCrypt says:\n%s\n' "${MOUNTINFO[*]}" >&2
+	if ! [ "$DEVICE" -ef "${MOUNTINFO[1]}" ]; then
+		printf 'Error: The specified device „%s“ does not match the mount point „%s“.\n' "$DEVICE" "$MOUNTPOINT" >&2
 		exit 1
 	fi
-	DEVICE="${MOUNTINFO[2]}"
-	#FSTYPE="`awk -v MOUNTPOINT="$MOUNTPOINT" '{ if ($2==MOUNTPOINT) { print $3; exit; }}' /proc/mounts`"
+	local -r TCDEVICE="${MOUNTINFO[2]}"
 
-	MOUNTOPTIONS=
-	! $VERBOSE || MOUNTOPTIONS+=' -v'
-	! $FAKE || MOUNTOPTIONS+=' -f'
-	exec mount $MOUNTOPTIONS -o "$FSOPTIONS" "$DEVICE" "$MOUNTPOINT"
-
-else # $REMOUNT
-
-default_keyfiles() {
-	set -e -o pipefail
-	[ -z "$1" ] || local -r HOME="`getent passwd "$1" | cut -d: -f6`"
-	test -n "$HOME"
-	local -r SOURCE="$HOME/.TrueCrypt/Default Keyfiles.xml" IFS=','
-	if [ -r "$SOURCE" ]; then
-		xpath -s "$IFS" -q -e '/TrueCrypt/defaultkeyfiles/keyfile/text()' "$SOURCE" | head -c "-${#IFS}"
-	fi
+	verbose exec mount -o "$FSOPTIONS" -t "$FSTYPE" $MOUNTOPTIONS "$DEVICE" "$MOUNTPOINT"
 }
 
-append_arg() {
-	while [ -n "$1" -a -n "$2" ]; do
-		local VAR="${!2#,}"
-		[ -z "$VAR" ] || TCOPTIONS+=( "${1}=${VAR}" )
-		shift 2
-	done
-}
-append_arg  --mount-options MOUNTOPTIONS --fs-options FSOPTIONS
 
-if [ -z "$KEYFILES" ]; then
-	KEYFILES="`default_keyfiles "$SUDO_USER"`"
-	if [ -z "$PROTECTIONKEYFILES" ]; then
-		PROTECTIONKEYFILES="$KEYFILES"
-	fi
-elif [ "$PROTECTHIDDEN" = yes -a -z "$PROTECTIONKEYFILES" ]; then
-	PROTECTIONKEYFILES="`default_keyfiles "$SUDO_USER"`"
-fi
-
-if [ "$PROTECTHIDDEN" = yes ]; then
-	TCOPTIONS+=( --protection-password="$PROTECTIONPASSWORD" --protection-keyfiles="${PROTECTIONKEYFILES#,}" )
-fi
-
-declare -ar CMDLINE=( "$TRUECRYPT" --text --password="$PASSWORD" --keyfiles="${KEYFILES#,}" --protect-hidden="$PROTECTHIDDEN" "${TCOPTIONS[@]}" "$DEVICE" "$MOUNTPOINT" )
-fi # $REMOUNT
-
-if $VERBOSE; then
-	echo "+ ${CMDLINE[@]}" >&2
-fi
-if ! $FAKE; then
-	exec "${CMDLINE[@]}"
-fi
+tc_$OP

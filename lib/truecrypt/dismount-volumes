@@ -1,20 +1,29 @@
 #!/bin/sh
 # Unmount TrueCrypt volumes and kill blocking applications if necessary
-
-TRUECRYPT='truecrypt --text --non-interactive'
+TRUECRYPT='truecrypt -t'
 grace_period="${1:-10}"
 
-if ! $TRUECRYPT --dismount; then
+
+truecrypt_umount_all() {
+	$TRUECRYPT -l 2>&- | cut -d ' ' -f 3 | \
+		xargs -r -d '\n' -- umount -i -- && \
+	$TRUECRYPT -d "$@"
+}
+
+
+truecrypt_umount_all || \
+{
 	test "`id -u`" -eq 0 && \
-	$TRUECRYPT --list | cut -d' ' -f4 | \
-		xargs -r -d'\n' -n1 -- readlink -f -- | \
-		xargs -r -d'\n' -- fuser -Mm 2>&- | \
+	$TRUECRYPT -l | cut -d ' ' -f 4 | \
+		xargs -r -d '\n' -n 1 -- readlink -f -- | \
+		xargs -r -d '\n' -- fuser -M -m 2>&- | \
 		xargs -r -- waitproc -qdtki "$grace_period" && \
-	$TRUECRYPT --dismount --force
-	r=$?
-	if [ $r != 0 ]; then
-		echo 'Something blocked (forcefully) unmounting one or more TrueCrypt partitions even after killing all processes using them. Those are left:' >&2
-		$TRUECRYPT --list >&2
+	truecrypt_umount_all --force || \
+	{
+		r=$?
+		exec >&2
+		echo 'Something blocked (forcefully) unmounting one or more TrueCrypt partitions even after killing all processes using them. Those are left:'
+		$TRUECRYPT -l
 		exit $r
-	fi
-fi
+	}
+}
