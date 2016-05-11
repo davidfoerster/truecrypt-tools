@@ -1,6 +1,6 @@
 #!/bin/sh
 # Unmount TrueCrypt volumes and kill blocking applications if necessary
-TRUECRYPT='truecrypt -t'
+TRUECRYPT="`command -v veracrypt || echo truecrypt` -t"
 grace_period="${1:-10}"
 
 

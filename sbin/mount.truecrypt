@@ -16,8 +16,21 @@ fi
 shift 2
 
 
-TRUECRYPT=truecrypt
-HELPER="helper=$TRUECRYPT"
+TRUECRYPT="`command -v veracrypt || echo truecrypt`"
+case "$TRUECRYPT" in
+	*truecrypt)
+		TC_CONFIG="$HOME/.TrueCrypt"
+		;;
+	*)
+		TC_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/VeraCrypt"
+		if [ ! -e "$TC_CONFIG/Configuration.xml" -a -e "$HOME/.VeraCrypt/Configuration.xml" ]; then
+			TC_CONFIG="$HOME/.VeraCrypt"
+		fi
+		;;
+else
+	
+fi
+HELPER='helper=truecrypt'
 FSTYPE=auto
 PROTECTHIDDEN=no
 OP=mount
@@ -106,7 +119,7 @@ default_keyfiles()
 	elif [ "${HOME:0:1}" != / ]; then
 		return 1
 	fi
-	local -r SOURCE="$HOME/.TrueCrypt/Default Keyfiles.xml"
+	local -r SOURCE="$TC_CONFIG/Default Keyfiles.xml"
 	[ ! -r "$SOURCE" ] || xpath -s ',' -q -e '/TrueCrypt/defaultkeyfiles/keyfile/text()' "$SOURCE"
 }
 

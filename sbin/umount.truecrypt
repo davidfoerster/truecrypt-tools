@@ -1,7 +1,7 @@
 #!/bin/bash
 # Unmount helper for TrueCrypt volumes
 set -e
-TRUECRYPT=truecrypt
+TRUECRYPT="`command -v veracrypt || echo truecrypt`"
 
 if [ $# -lt 1 ]; then
 	echo 'Error: too few arguments -- I need at least a device or a mount point.' >&2
