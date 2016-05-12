@@ -1,29 +1,38 @@
-#!/bin/sh
+#!/bin/bash
 # Unmount TrueCrypt volumes and kill blocking applications if necessary
-TRUECRYPT="`command -v veracrypt || echo truecrypt` -t"
-grace_period="${1:-10}"
+set -eu -o pipefail
 
+TRUECRYPT="`command -v veracrypt || echo truecrypt` -t"
+grace_period="${1-10}"
+
+am_i_root() {
+	test -w /dev
+}
 
 truecrypt_umount_all() {
-	$TRUECRYPT -l 2>&- | cut -d ' ' -f 3 | \
-		xargs -r -d '\n' -- umount -i -- && \
+	$TRUECRYPT -l 2>&- | cut -d ' ' -f 3 |
+		xargs -r -d '\n' -- umount -i -- &&
 	$TRUECRYPT -d "$@"
 }
 
+if ! am_i_root; then
+	echo 'You need to be root for this!' >&2
+	exit 1
+fi
 
-truecrypt_umount_all || \
-{
-	test "`id -u`" -eq 0 && \
-	$TRUECRYPT -l | cut -d ' ' -f 4 | \
-		xargs -r -d '\n' -n 1 -- readlink -f -- | \
-		xargs -r -d '\n' -- fuser -M -m 2>&- | \
-		xargs -r -- waitproc -qdtki "$grace_period" && \
-	truecrypt_umount_all --force || \
-	{
+if ! truecrypt_umount_all; then
+	declare -i r=0
+	$TRUECRYPT -l | cut -d ' ' -f 4 |
+		xargs -r -d '\n' -n 1 -- readlink -e -- |
+		xargs -r -d '\n' -- fuser -M -m 2>&- |
+		xargs -r -- waitproc -qdtki "$grace_period" &&
+	truecrypt_umount_all --force ||
 		r=$?
+
+	if [ $r -ne 0 ]; then
 		exec >&2
 		echo 'Something blocked (forcefully) unmounting one or more TrueCrypt partitions even after killing all processes using them. Those are left:'
-		$TRUECRYPT -l
+		$TRUECRYPT -l || true
 		exit $r
-	}
-}
+	fi
+fi
